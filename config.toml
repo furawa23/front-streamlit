@@ -1,0 +1,11 @@
+# .streamlit/config.toml
+[theme]
+primaryColor = "#0068c9"
+backgroundColor = "#f8f9fb"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#31333F"
+font = "sans serif"
+
+[server]
+# Ocultar el menú de configuración por defecto para los usuarios
+enableCORS = false
