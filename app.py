@@ -1,152 +1,143 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import os
 
-# --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="EPS Operational Intelligence", layout="wide")
+# --- 1. CONFIGURACIÓN Y ESTILO ---
+st.set_page_config(page_title="EPS Operational & Financial Intelligence", layout="wide")
 
-# Estilos CSS para tarjetas y cuadros de sugerencia
 st.markdown("""
     <style>
-        .main { background-color: #F8FAFC; }
-        .metric-card { background-color: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-top: 4px solid #2563EB; }
-        .insight-container { background-color: #F0F7FF; border-radius: 8px; padding: 15px; border-left: 5px solid #3B82F6; margin-top: 10px; }
-        .math-logic { font-family: monospace; color: #1E40AF; font-weight: bold; }
-        .suggestion-text { color: #1E293B; font-size: 0.95rem; margin-top: 5px; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+        .main { background-color: #F1F5F9; }
+        header {visibility: hidden;} footer {visibility: hidden;}
+        .card-calc {
+            background-color: white; padding: 25px; border-radius: 15px;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            border-bottom: 5px solid #10B981; text-align: center;
+        }
+        .money-value { color: #059669; font-size: 2.2rem; font-weight: 800; }
+        .calc-label { color: #64748B; font-size: 0.9rem; font-weight: 600; text-transform: uppercase; }
+        .logic-container { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 20px; margin-top: 15px; }
+        .formula-tag { background-color: #DBEAFE; color: #1E40AF; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-weight: bold; font-size: 0.9rem; }
+        .action-tag { background-color: #FEF3C7; color: #92400E; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9rem; }
+        .highlight-calc { background-color: #FFF7ED; font-weight: bold; color: #C2410C; padding: 2px 4px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CARGA DE DATOS ---
+# --- 2. CARGA DE DATOS CON LIMPIEZA ---
 @st.cache_data
 def load_data():
-    ruta = 'data/resultados.csv'
+    ruta = 'data/dataset_r.csv'
     if os.path.exists(ruta):
         df = pd.read_csv(ruta)
         df['fecha'] = pd.to_datetime(df['fecha'])
+        # LIMPIEZA CRÍTICA: Rellenar nulos para evitar errores en cálculos
+        df['duracion_horas'] = pd.to_numeric(df['duracion_horas'], errors='coerce').fillna(0)
+        df['impacto'] = pd.to_numeric(df['impacto'], errors='coerce').fillna(0)
+        
+        if 'costo_reparacion' not in df.columns:
+            df['costo_reparacion'] = (df['duracion_horas'] * 150) + 500
+        else:
+            df['costo_reparacion'] = pd.to_numeric(df['costo_reparacion'], errors='coerce').fillna(0)
+            
+        if 'presion_psi' not in df.columns:
+            df['presion_psi'] = 25 # Valor base simulado
+            
         return df
     return pd.DataFrame()
 
 df = load_data()
 
+# --- 3. LÓGICA DE FILTROS ---
 if not df.empty:
-    # --- SIDEBAR (USABILIDAD MEJORADA) ---
     with st.sidebar:
-        st.header("🔍 Central de Filtros")
-        sel_empresa = st.selectbox("Entidad EPS", ["Todas las EPS"] + list(df['empresa'].unique()))
-        sel_motivo = st.multiselect("Motivo de Incidencia", df['motivo'].unique(), default=df['motivo'].unique())
+        st.header("⚙️ Parámetros")
+        eps_list = ["Todas las EPS"] + sorted(list(df['empresa'].unique()))
+        sel_eps = st.selectbox("Entidad seleccionada", eps_list)
         
-        st.divider()
-        st.markdown("### ⚙️ Configuración de Vista")
-        vista_detalle = st.toggle("Mostrar Tabla de Datos Crudos", value=False)
+        motivos_disponibles = sorted(list(df['motivo'].unique()))
+        sel_motivos = st.multiselect("Tipos de Incidencia", motivos_disponibles, default=motivos_disponibles)
 
-    # Lógica de Filtrado
+    # Filtrado
     df_f = df.copy()
-    if sel_empresa != "Todas las EPS":
-        df_f = df_f[df_f['empresa'] == sel_empresa]
-    df_f = df_f[df_f['motivo'].isin(sel_motivo)]
+    if sel_eps != "Todas las EPS":
+        df_f = df_f[df_f['empresa'] == sel_eps]
+    df_f = df_f[df_f['motivo'].isin(sel_motivos)]
 
-    # Variables Dinámicas para Títulos
-    nombre_eps = sel_empresa if sel_empresa != "Todas las EPS" else "Sector Saneamiento"
-    nombre_falla = ", ".join(sel_motivo) if len(sel_motivo) < 3 else "Múltiples Causas"
+    # --- CONTROL DE "DATOS VACÍOS" (EVITA EL CRASH) ---
+    if df_f.empty:
+        st.warning("⚠️ No hay datos que coincidan con la selección. Por favor, selecciona al menos un Motivo de Incidencia en la barra lateral.")
+        st.stop() # Detiene la ejecución aquí para que no intente graficar nada vacío
 
-    # --- HEADER DINÁMICO ---
-    st.title(f"📊 Dashboard Operacional: {nombre_eps}")
-    st.caption(f"Análisis enfocado en: {nombre_falla}")
+    # --- 4. DASHBOARD ---
+    contexto = f"en {sel_eps}" if sel_eps != "Todas las EPS" else "Regional"
+    st.title(f"🚀 Monitor Prescriptivo: {contexto}")
 
-    # --- KPIs ---
-    k1, k2, k3, k4 = st.columns(4)
-    with k1: st.markdown(f"<div class='metric-card'><b>Horas de Corte</b><br><h2>{df_f['duracion_horas'].sum():,.1f}</h2></div>", unsafe_allow_html=True)
-    with k2: st.markdown(f"<div class='metric-card'><b>Usuarios Afectados</b><br><h2>{df_f['impacto'].sum():,.0f}</h2></div>", unsafe_allow_html=True)
-    with k3: st.markdown(f"<div class='metric-card'><b>Costo Est.</b><br><h2>S/. {df_f['impacto'].sum()*0.5:,.0f}</h2></div>", unsafe_allow_html=True)
-    with k4: 
-        est_criticas = df_f.groupby('estacion_id')['duracion_horas'].sum().count()
-        st.markdown(f"<div class='metric-card'><b>Puntos Críticos</b><br><h2>{est_criticas}</h2></div>", unsafe_allow_html=True)
+    # KPIs Resaltados
+    c1, c2, c3 = st.columns(3)
+    total_costo = df_f['costo_reparacion'].sum()
+    total_horas = df_f['duracion_horas'].sum()
+    
+    with c1:
+        st.markdown(f"<div class='card-calc'><div class='calc-label'>Costo Operativo</div><div class='money-value'>S/. {total_costo:,.0f}</div></div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"<div class='card-calc' style='border-bottom-color: #3B82F6;'><div class='calc-label'>Servicio Perdido</div><div class='money-value' style='color:#1D4ED8;'>{total_horas:,.1f} h</div></div>", unsafe_allow_html=True)
+    with c3:
+        pob_total = df_f['impacto'].sum()
+        st.markdown(f"<div class='card-calc' style='border-bottom-color: #F59E0B;'><div class='calc-label'>Impacto Total</div><div class='money-value' style='color:#B45309;'>{pob_total:,.0f} hab</div></div>", unsafe_allow_html=True)
 
     st.divider()
 
-    # --- BLOQUE 1: TOP FALLAS (BARRAS) ---
-    st.subheader(f"📍 Ranking de Criticidad por Instalación - {nombre_eps}")
-    df_bar = df_f.groupby('estacion_id')['duracion_horas'].sum().nlargest(8).reset_index()
-    fig_bar = px.bar(df_bar, x='estacion_id', y='duracion_horas', color='duracion_horas', color_continuous_scale='Blues')
-    st.plotly_chart(fig_bar, use_container_width=True)
+    # BLOQUE GRÁFICOS
+    col_a, col_b = st.columns([2, 1])
     
-    # Interpretación Matemática 1
-    total_h = df_f['duracion_horas'].sum()
-    peor_id = df_bar.iloc[0]['estacion_id']
-    peor_val = df_bar.iloc[0]['duracion_horas']
-    porcentaje = (peor_val / total_h) * 100
-    
-    st.markdown(f"""
-    <div class='insight-container'>
-        <span class='math-logic'>Lógica: (Σ horas_{peor_id} / Σ horas_totales) = {porcentaje:.1f}%</span>
-        <div class='suggestion-text'>
-            <b>Interpretación:</b> La instalación <b>{peor_id}</b> concentra casi la cuarta parte de las fallas del filtro actual. 
-            <br><b>Sugerencia:</b> Iniciar auditoría técnica en <b>{peor_id}</b>. Si se reduce su falla a la mitad, recuperamos {peor_val/2:.1f} horas de servicio global.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # --- BLOQUE 2: TENDENCIA Y CAUSAS ---
-    col_a, col_b = st.columns(2)
-
     with col_a:
-        st.subheader(f"📈 Tendencia de {nombre_falla}")
-        df_line = df_f.groupby('fecha')['duracion_horas'].sum().reset_index()
-        fig_line = px.line(df_line, x='fecha', y='duracion_horas', markers=True)
-        st.plotly_chart(fig_line, use_container_width=True)
+        st.subheader("📍 Análisis de Criticidad por Instalación")
+        df_inst = df_f.groupby('estacion_id').agg({'costo_reparacion': 'sum', 'duracion_horas': 'sum'}).reset_index().sort_values('costo_reparacion', ascending=False)
         
-        # Matemática 2
-        promedio = df_line['duracion_horas'].mean()
-        st.markdown(f"""
-        <div class='insight-container'>
-            <span class='math-logic'>Media Móvil: μ = {promedio:.2f} h/día</span>
-            <div class='suggestion-text'>
-                <b>Interpretación:</b> El sistema opera con una pérdida constante. 
-                <br><b>Sugerencia:</b> Si la tendencia supera las {promedio*1.2:.1f}h, activar protocolo de emergencia de nivel 2.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        fig_inst = px.bar(df_inst.head(10), x='estacion_id', y='costo_reparacion', color='duracion_horas', 
+                          color_continuous_scale='YlOrRd', labels={'costo_reparacion':'Gasto S/.', 'duracion_horas':'Horas'})
+        fig_inst.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_inst, use_container_width=True)
 
     with col_b:
-        st.subheader("🍕 Distribución por Motivo")
-        fig_pie = px.pie(df_f, names='motivo', values='duracion_horas', hole=0.4)
-        st.plotly_chart(fig_pie, use_container_width=True)
-        
-        # Matemática 3
-        motivo_top = df_f.groupby('motivo')['duracion_horas'].sum().idxmax()
-        st.markdown(f"""
-        <div class='insight-container'>
-            <span class='math-logic'>P(Moda_Causa) = {motivo_top}</span>
-            <div class='suggestion-text'>
-                <b>Interpretación:</b> <b>{motivo_top}</b> es el "cuello de botella" operativo dominante.
-                <br><b>Sugerencia:</b> Capacitar cuadrillas específicamente en resolución de <b>{motivo_top}</b> para bajar el MTTR (Tiempo medio de reparación).
+        st.markdown("### 🔍 Auditoría Económica")
+        # Uso de try/except por si el filtrado extremo rompe el acceso a índices
+        try:
+            top_id = df_inst.iloc[0]['estacion_id']
+            costo_top = df_inst.iloc[0]['costo_reparacion']
+            pct = (costo_top / total_costo * 100) if total_costo > 0 else 0
+            
+            st.markdown(f"""
+            <div class='logic-container'>
+                <span class='formula-tag'>Lógica: (Gasto_Max / Gasto_Total)</span>
+                <p class='suggestion-text'>
+                    La instalación <b>{top_id}</b> representa el <span class='highlight-calc'>{pct:.1f}%</span> del gasto actual.
+                    <br><br><span class='action-tag'>PRESCRIPCIÓN:</span> Iniciar plan de renovación hidráulica en este sector para frenar el drenaje de fondos.
+                </p>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+        except:
+            st.info("Selecciona más datos para ver el análisis detallado.")
 
-    # --- 5. EL SIMULADOR DE IMPACTO (MEJORADO) ---
+    # SIMULADOR FINAL
     st.divider()
-    st.header("⚙️ Simulador Prescriptivo de Decisiones")
-    c_s1, c_s2 = st.columns([1, 2])
+    st.header("⚙️ Simulador Prescriptivo de Retorno (ROI)")
+    s1, s2, s3 = st.columns(3)
     
-    with c_s1:
-        st.write("¿Qué pasa si invertimos en mejoras?")
-        inv_logistica = st.slider("Inversión en logística (%)", 0, 100, 25)
-        mejora_red = st.slider("Renovación de tuberías (%)", 0, 100, 10)
-    
-    with c_s2:
-        horas_ahorradas = (total_h * (inv_logistica/200)) + (total_h * (mejora_red/150))
-        st.subheader(f"Resultado Estimado para {nombre_eps}")
-        st.info(f"Con esta configuración, se estima una recuperación de **{horas_ahorradas:,.1f} horas** de agua al mes.")
-        
-        # Sugerencia Matemática Final
-        st.write(f"**Justificación:** El modelo asume una correlación de 0.5 entre logística y tiempo de respuesta. El ROI social estimado es de S/. {horas_ahorradas * 120:,.0f} en productividad ciudadana.")
-
-    if vista_detalle:
-        st.divider()
-        st.subheader("📄 Detalle de Incidentes Filtrados")
-        st.dataframe(df_f, use_container_width=True)
+    with s1:
+        mejora = st.slider("Optimización de Respuesta (%)", 0, 100, 20)
+    with s2:
+        horas_recup = total_horas * (mejora/100)
+        st.metric("Horas Recuperadas", f"+{horas_recup:,.1f} h", delta="Impacto Social")
+    with s3:
+        ahorro = (total_costo * 0.15) * (mejora/100) # Lógica: 15% del costo es variable por tiempo
+        st.markdown(f"<div class='card-calc' style='border-bottom-color: #059669; padding: 15px;'>", unsafe_allow_html=True)
+        st.markdown(f"<div class='calc-label'>Ahorro Potencial</div><div class='money-value' style='font-size:1.5rem'>S/. {ahorro:,.0f}</div></div>", unsafe_allow_html=True)
 
 else:
-    st.warning("⚠️ No se detectó el archivo 'data/dataset_r.csv'. Por favor, cárgalo para activar el análisis.")
+    st.error("Archivo no encontrado o vacío.")
