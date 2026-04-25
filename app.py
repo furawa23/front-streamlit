@@ -19,7 +19,7 @@ st.markdown("""
 # --- 2. MOTOR DE DATOS (Simulando el Colab) ---
 @st.cache_data
 def load_data():
-    ruta = 'data/dataset.csv'
+    ruta = 'data/resultados.csv'
     if os.path.exists(ruta):
         df = pd.read_csv(ruta)
         df['fecha'] = pd.to_datetime(df['fecha'])
