@@ -27,7 +27,7 @@ st.markdown("""
 # --- 2. CARGA DE DATOS Y LIMPIEZA CRÍTICA ---
 @st.cache_data
 def load_data():
-    ruta = 'data/dataset_r.csv'
+    ruta = 'data/resultados.csv'
     if os.path.exists(ruta):
         df = pd.read_csv(ruta)
         df['fecha'] = pd.to_datetime(df['fecha'])
